@@ -4,16 +4,11 @@ import csv
 import copy
 import argparse
 import itertools
-from collections import Counter
-from collections import deque
-
 import cv2 as cv
 import numpy as np
 import mediapipe as mp
 
-from utils import CvFpsCalc
 from model import KeyPointClassifier
-from model import PointHistoryClassifier
 
 from utils import calc_landmark_list, pre_process_landmark
 
@@ -27,7 +22,7 @@ def get_args():
 
     parser.add_argument("--device", type=int, default=0)
     parser.add_argument("--width", help='cap width', type=int, default=960)
-    parser.add_argument("--height", help='cap height', type=int, default=540)
+    parser.add_argument("--height", help='cap height', type=int, default=960)
 
     parser.add_argument('--use_static_image_mode', action='store_true')
     parser.add_argument("--min_detection_confidence",
@@ -285,7 +280,8 @@ def load_model():
     cv.destroyAllWindows()
     return detected_number'''
 
-def get_two_player_numbers(hands, classifier, labels):
+
+'''def get_two_player_numbers(hands, classifier, labels):
     import time
     cap = cv.VideoCapture(0)
     print("Both players: Show your signs (0-5)... Hold steady!")
@@ -372,9 +368,213 @@ def get_two_player_numbers(hands, classifier, labels):
     return n1, n2
 
 
+# ✅ Optimized Hand Detection for Two-Player Gesture Input
+# Uses high-resolution, improved smoothing, and detailed debug info
+'''
+
+
+
+
+'''def get_two_player_numbers(cap, hands, classifier, labels):
+    import time
+    print("Both players: Show your signs (0-5)... Hold steady!")
+
+    detected_numbers = [None, None]
+    stable_frames = [0, 0]
+    previous_numbers = [-1, -1]
+
+    start_time = time.time()
+    timeout = 30  # seconds to wait before abort
+
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            continue
+
+        frame = cv.flip(frame, 1)
+        debug_image = copy.deepcopy(frame)
+        image_rgb = cv.cvtColor(frame, cv.COLOR_BGR2RGB)
+        results = hands.process(image_rgb)
+
+        detected_hands = []
+
+        if results.multi_hand_landmarks and results.multi_handedness:
+            for hand_landmarks, handedness in zip(results.multi_hand_landmarks, results.multi_handedness):
+                # Draw skeleton
+                mp_drawing.draw_landmarks(
+                    debug_image,
+                    hand_landmarks,
+                    mp_hands.HAND_CONNECTIONS,
+                    mp_drawing.DrawingSpec(color=(0, 255, 0), thickness=2, circle_radius=4),
+                    mp_drawing.DrawingSpec(color=(255, 0, 0), thickness=2),
+                )
+
+                landmark_list = calc_landmark_list(debug_image, hand_landmarks)
+                pre_processed = pre_process_landmark(landmark_list)
+                hand_id = classifier(pre_processed)
+                try:
+                    number = int(labels[hand_id])
+                except:
+                    number = -1
+
+                hand_label = handedness.classification[0].label  # 'Left' or 'Right'
+                detected_hands.append((hand_label, number))
+
+                y_offset = 30 if hand_label == "Left" else 60
+                cv.putText(debug_image, f"{hand_label}: {number}",
+                           (10, y_offset),
+                           cv.FONT_HERSHEY_SIMPLEX, 1.0, (0, 255, 0), 2)
+
+        # Track stable gestures
+        for hand_label, number in detected_hands:
+            index = 0 if hand_label == "Left" else 1
+            if number == previous_numbers[index]:
+                stable_frames[index] += 1
+            else:
+                stable_frames[index] = 0
+                previous_numbers[index] = number
+
+            if stable_frames[index] >= 7:
+                detected_numbers[index] = number
+
+        # Overlay info
+        cv.putText(debug_image, "Show numbers with both hands", (10, 100),
+                   cv.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
+
+        cv.putText(debug_image, f"Left Stable: {stable_frames[0]}", (10, 130),
+                   cv.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
+        cv.putText(debug_image, f"Right Stable: {stable_frames[1]}", (10, 160),
+                   cv.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
+
+        cv.imshow("Two Player Gesture", debug_image)
+
+        if all(n is not None for n in detected_numbers):
+            break
+
+        if time.time() - start_time > timeout:
+            print("\u26a0\ufe0f Timed out! Show signs quickly next time.")
+            break
+
+        if cv.waitKey(1) == 27:
+            break
+
+    print(f"\u2705 Player 1 (Left): {detected_numbers[0]}, Player 2 (Right): {detected_numbers[1]}")
+    return detected_numbers[0] or 0, detected_numbers[1] or 0
+
+
+'''
+
+# ✅ Optimized Hand Detection for Two-Player Gesture Input
+# Uses high-resolution, improved smoothing, and detailed debug info
+
+def get_two_player_numbers(cap, hands, classifier, labels):
+    import time
+    print("Both players: Show your signs (0-5)... Hold steady!")
+
+    detected_numbers = [None, None]
+    stable_frames = [0, 0]
+    previous_numbers = [-1, -1]
+
+    start_time = time.time()
+    timeout = 30  # seconds to wait before abort
+
+    waiting_phase = True
+    print("✋ Waiting for both players to show '0' (fist) to start...")
+
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            continue
+
+        frame = cv.flip(frame, 1)
+        debug_image = copy.deepcopy(frame)
+        image_rgb = cv.cvtColor(frame, cv.COLOR_BGR2RGB)
+        results = hands.process(image_rgb)
+
+        detected_hands = {"Left": None, "Right": None}
+
+        if results.multi_hand_landmarks and results.multi_handedness:
+            for hand_landmarks, handedness in zip(results.multi_hand_landmarks, results.multi_handedness):
+                mp_drawing.draw_landmarks(
+                    debug_image,
+                    hand_landmarks,
+                    mp_hands.HAND_CONNECTIONS,
+                    mp_drawing.DrawingSpec(color=(0, 255, 0), thickness=2, circle_radius=4),
+                    mp_drawing.DrawingSpec(color=(255, 0, 0), thickness=2),
+                )
+
+                landmark_list = calc_landmark_list(debug_image, hand_landmarks)
+                pre_processed = pre_process_landmark(landmark_list)
+                hand_id = classifier(pre_processed)
+                try:
+                    number = int(labels[hand_id])
+                except:
+                    number = -1
+
+                hand_label = handedness.classification[0].label  # 'Left' or 'Right'
+                detected_hands[hand_label] = number
+
+                y_offset = 30 if hand_label == "Left" else 60
+                cv.putText(debug_image, f"{hand_label}: {number}",
+                           (10, y_offset),
+                           cv.FONT_HERSHEY_SIMPLEX, 1.0, (0, 255, 0), 2)
+
+        if waiting_phase:
+            if detected_hands["Left"] == 0 and detected_hands["Right"] == 0:
+                print("🎮 Both players ready. Start showing real signs!")
+                waiting_phase = False
+                stable_frames = [0, 0]
+                previous_numbers = [-1, -1]
+                time.sleep(1)
+            else:
+                cv.putText(debug_image, "Show '0' on both hands to begin", (10, 100),
+                           cv.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2)
+                cv.imshow("Two Player Gesture", debug_image)
+                if time.time() - start_time > timeout:
+                    print("⚠️ Timed out! Start signal not detected.")
+                    break
+                if cv.waitKey(1) == 27:
+                    break
+                continue
+
+        for idx, hand_label in enumerate(["Left", "Right"]):
+            number = detected_hands[hand_label]
+            if number == previous_numbers[idx]:
+                stable_frames[idx] += 1
+            else:
+                stable_frames[idx] = 0
+                previous_numbers[idx] = number
+
+            if stable_frames[idx] >= 7:
+                detected_numbers[idx] = number
+
+        cv.putText(debug_image, "Show numbers with both hands", (10, 100),
+                   cv.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
+
+        cv.putText(debug_image, f"Left Stable: {stable_frames[0]}", (10, 130),
+                   cv.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
+        cv.putText(debug_image, f"Right Stable: {stable_frames[1]}", (10, 160),
+                   cv.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
+
+        cv.imshow("Two Player Gesture", debug_image)
+
+        if all(n is not None for n in detected_numbers):
+            break
+
+        if time.time() - start_time > timeout:
+            print("⚠️ Timed out! Show signs quickly next time.")
+            break
+
+        if cv.waitKey(1) == 27:
+            break
+
+    print(f"✅ Player 1 (Left): {detected_numbers[0]}, Player 2 (Right): {detected_numbers[1]}")
+    return detected_numbers[0] or 0, detected_numbers[1] or 0
+
+
 
 # === Full Game Flow ===
-def odd_even_game():
+'''def odd_even_game():
     hands, classifier, labels = load_model()
     p1 = Player("Player 1")
     p2 = Player("Player 2")
@@ -383,7 +583,7 @@ def odd_even_game():
     p1.choice = input("Player 1, choose Odd or Even: ").strip().lower()
     p2.choice = "even" if p1.choice == "odd" else "odd"
 
-    n1, n2 = get_two_player_numbers(hands, classifier, labels)
+    n1, n2 = get_two_player_numbers(cap, hands, classifier, labels)
 
 
     total = n1 + n2
@@ -403,7 +603,7 @@ def odd_even_game():
 
     print(f"\n==== First Innings: {batter.name} Batting ====")
     while True:
-        bat, bowl = get_two_player_numbers(hands, classifier, labels)
+        bat, bowl = get_two_player_numbers(cap, hands, classifier, labels)
         print(f"{batter.name}: {bat}, {bowler.name}: {bowl}")
         if bat == bowl:
             print(f"{batter.name} is OUT!")
@@ -421,7 +621,72 @@ def odd_even_game():
 
     print(f"\n==== Second Innings: {batter.name} Batting ====")
     while True:
-        bat, bowl = get_two_player_numbers(hands, classifier, labels)
+        bat, bowl = get_two_player_numbers(cap, hands, classifier, labels)
+        print(f"{batter.name}: {bat}, {bowler.name}: {bowl}")
+        if bat == bowl:
+            print(f"{batter.name} is OUT!")
+            break
+        else:
+            batter.score += bat
+            print(f"Score: {batter.score}")
+            if batter.score >= target:
+                print(f"{batter.name} has chased the target!")
+                break
+
+    print("\n==== RESULT ====")
+    if batter.score >= target:
+        print(f"{batter.name} wins!")
+    else:
+        print(f"{bowler.name} wins!")
+'''
+
+def odd_even_game(cap):
+    hands, classifier, labels = load_model()
+    p1 = Player("Player 1")
+    p2 = Player("Player 2")
+
+    print("\n==== ODD-EVEN TOSS ====")
+    p1.choice = input("Player 1, choose Odd or Even: ").strip().lower()
+    p2.choice = "even" if p1.choice == "odd" else "odd"
+
+    n1, n2 = get_two_player_numbers(cap, hands, classifier, labels)
+
+    total = n1 + n2
+    print(f"Player 1: {n1}, Player 2: {n2}, Total: {total} => {'Even' if total % 2 == 0 else 'Odd'}")
+
+    toss_winner = p1 if (total % 2 == 0 and p1.choice == "even") or (total % 2 != 0 and p1.choice == "odd") else p2
+    toss_loser = p2 if toss_winner == p1 else p1
+
+    toss_winner.role = input(f"{toss_winner.name}, choose role (bat/bowl): ").strip().lower()
+    toss_loser.role = "bowl" if toss_winner.role == "bat" else "bat"
+
+    print(f"\n{toss_winner.name} is {toss_winner.role}, {toss_loser.name} is {toss_loser.role}")
+
+    # Set innings
+    batter = toss_winner if toss_winner.role == "bat" else toss_loser
+    bowler = toss_loser if batter == toss_winner else toss_winner
+
+    print(f"\n==== First Innings: {batter.name} Batting ====")
+    while True:
+        bat, bowl = get_two_player_numbers(cap, hands, classifier, labels)
+        print(f"{batter.name}: {bat}, {bowler.name}: {bowl}")
+        if bat == bowl:
+            print(f"{batter.name} is OUT!")
+            break
+        else:
+            batter.score += bat
+            print(f"Score: {batter.score}")
+
+    target = batter.score + 1
+    print(f"\nTarget for {bowler.name}: {target}")
+
+    # Second innings
+    batter, bowler = bowler, batter
+    batter.score = 0
+
+    print(f"\n==== Second Innings: {batter.name} Batting ====")
+    while True:
+        bat, bowl = get_two_player_numbers(cap, hands, classifier, labels)
         print(f"{batter.name}: {bat}, {bowler.name}: {bowl}")
         if bat == bowl:
             print(f"{batter.name} is OUT!")
@@ -439,9 +704,12 @@ def odd_even_game():
     else:
         print(f"{bowler.name} wins!")
 
-# Run it!
+
 if __name__ == "__main__":
-    odd_even_game()
+    cap = cv.VideoCapture(0)  # Initialize the camera once
+    odd_even_game(cap)        # Pass it to the game
+    cap.release()             # Release after game finishes
+    cv.destroyAllWindows()
 
 
 
